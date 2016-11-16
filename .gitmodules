@@ -1,0 +1,9 @@
+[submodule "thirdparty/mongoose"]
+	path = thirdparty/mongoose
+	url = https://github.com/cesanta/mongoose.git
+[submodule "thirdparty/jsoncpp"]
+	path = thirdparty/jsoncpp
+	url = https://github.com/open-source-parsers/jsoncpp.git
+[submodule "thirdparty/linenoise"]
+	path = thirdparty/linenoise
+	url = https://github.com/antirez/linenoise.git

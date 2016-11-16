@@ -1,0 +1,20 @@
+compiler: g++
+language: cpp
+
+addons:
+  apt:
+    sources:
+      - ubuntu-toolchain-r-test
+    packages:
+      - g++-5
+      - cmake
+      - libreadline6
+      - libreadline6-dev
+      #- gcc-5
+      #- clang-3.6
+
+before_script:
+  - rm -f cmdlog
+
+script: 
+  - make clean all
