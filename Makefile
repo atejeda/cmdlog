@@ -7,7 +7,7 @@ SOURCES    = src/cmdlog.cpp ${JSONCPP}/jsoncpp.cpp
 LIBRARIES  =
 INCLUDE    = -I${MONGOOSE} -I${JSONCPP}/json -I${LINENOISE}
 
-CXXFLAGS   = -Wno-comment -Wno-deprecated-declaration -std=c++0x
+CXXFLAGS   = -Wno-comment -Wno-deprecated-declarations -std=c++0x
 # -std=c++11 | -std=c++0x | -std=gnu++11 # 0.y.z for jsoncpp, -Wall
 
 CXX		   = g++

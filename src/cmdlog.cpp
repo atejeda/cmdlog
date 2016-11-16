@@ -16,11 +16,12 @@
  * along with this program; if not, write to the Free Software Foundation,
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
  *
- * Notes:  
+ * Notes:
  * - Indexed patterns aos64-* (default), aos-*
  * - Not added but could be enabled in options:
  * { "analyze_wildcard": true }
  * { "unmapped_type": "boolean" }
+ *
  */
 
 #include <iostream>
@@ -48,26 +49,33 @@ static const char* header = "Content-Type: application/json; charset=UTF-8\r\n";
 //elk-master@osfp9200
 static const std::string esurl = "http://localhost:9200";
 
-static const std::string searchq = R"DL(
-{
-    "from" : 0, 
+// https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html
+// "(content:this OR name:this) AND (content:that OR name:that)"
+// https://www.elastic.co/guide/en/elasticsearch/reference/current/search-request-sort.html
+
+static const std::string searchq = R"DL({
+    "from" : 0,
     "size" : 1,
     "query": {
         "query_string":  {
-           "query": "*"
-        }    
-    }
-}
-)DL";
+            "default_field" : "text",
+            "query": "*"
+        }
+    },
+    "sort": [
+        { "TimeStamp":   { "order": "desc" }},
+        { "_score": { "order": "desc" }}
+    ]
+})DL";
 
-static const std::string searchqt = R"DL(
-{
-    "from" : 0, 
+static const std::string searchqt = R"DL({
+    "from" : 0,
     "size" : 1,
     "query" : {
         "filtered" : {
             "query" : {
                 "query_string": {
+                    "default_field" : "text",
                     "query" : "*"
                 }
             },
@@ -82,8 +90,7 @@ static const std::string searchqt = R"DL(
             }
         }
     }
-}
-)DL";
+})DL";
 
 // defines
 
@@ -107,7 +114,7 @@ static std::map<std::string, logfield_t> logfields = {
     { "tags",         (logfield_t) { "tags",         true } },  // Tags
     { "sourceobject", (logfield_t) { "SourceObject", true  } }, // SourceObject
     { "thread",       (logfield_t) { "Thread",       false } }, // Thread
-    { "loglevel",     (logfield_t) { "LogLevel",     false } }, // LogLevel
+    { "loglevel",     (logfield_t) { "LogLevel",     true } }, // LogLevel
     { "timestamp",    (logfield_t) { "TimeStamp",    true  } }, // TimeStamp
     { "logid",        (logfield_t) { "LogId",        false } }, // LogId
     { "process",      (logfield_t) { "Process",      false } }, // Process
@@ -137,7 +144,7 @@ static vector<logfield_t*> vlogfields = {
 
 static std::map<std::string, std::string> variables = {
     { "from", "0" },
-    { "size", "1" },
+    { "size", "5" },
     { "lte", "2016-11-15T13:39:49.179" },
     { "gte", "2016-11-14T13:39:49.179" },
     { "restricted", "0" }
@@ -149,7 +156,7 @@ static int s_exit_flag = 0;
 
 // client
 
-string constructUrl(std::string url) { 
+string constructUrl(std::string url) {
     std::string constructed_url = esurl + url;
     return constructed_url;
 }
@@ -162,7 +169,7 @@ std::string constructQuery(std::string query, std::string from, std::string size
     ss >> root;
 
     // time range
-    if (restricted) {    
+    if (restricted) {
         root["query"]["filtered"]["filter"]["range"]["TimeStamp"]["lte"] = lte;
         root["query"]["filtered"]["filter"]["range"]["TimeStamp"]["gte"] = gte;
         root["query"]["filtered"]["query"]["query_string"]["query"] = query;
@@ -172,7 +179,7 @@ std::string constructQuery(std::string query, std::string from, std::string size
 
     root["from"] = from;
     root["size"] = size;
-    
+
 
     return root.toStyledString();
 }
@@ -227,7 +234,7 @@ static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
 
                 cout << endl;
             }
-        
+
             nc->flags |= MG_F_SEND_AND_CLOSE;
             s_exit_flag = 1;
             break;
@@ -249,7 +256,7 @@ void cmdQuery(vector<std::string> input) {
     for (unsigned i = 1; i < input.size() - 1; i++)
         iquery += input[i] + " ";
 
-    if (input.size() > 1) 
+    if (input.size() > 1)
         iquery += input[input.size() - 1];
 
     auto restricted = (variables["restricted"] == "1");
@@ -260,14 +267,14 @@ void cmdQuery(vector<std::string> input) {
     mg_mgr_init(&mgr, NULL);
 
     nc = mg_connect_http(
-            &mgr, 
-            ev_handler, 
+            &mgr,
+            ev_handler,
             constructUrl("/_all/_search").c_str(),
-            header, 
-            constructQuery(input[1], 
-                variables["from"], 
-                variables["size"], 
-                variables["lte"], 
+            header,
+            constructQuery(input[1],
+                variables["from"],
+                variables["size"],
+                variables["lte"],
                 variables["gte"],
                 restricted).c_str());
 
@@ -336,15 +343,15 @@ void cmdTest(vector<std::string> argv) {
     for (unsigned i = 1; i < argv.size() - 1; i++)
         iquery += argv[i] + " ";
 
-    if (argv.size() > 1) 
+    if (argv.size() > 1)
         iquery += argv[argv.size() - 1];
 
     auto restricted = (variables["restricted"] == "1");
 
-    cout << constructQuery(iquery, 
-            variables["from"], 
-            variables["size"], 
-            variables["lte"], 
+    cout << constructQuery(iquery,
+            variables["from"],
+            variables["size"],
+            variables["lte"],
             variables["gte"],
             restricted).c_str() << endl;
 }
