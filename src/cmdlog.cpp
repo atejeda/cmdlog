@@ -434,19 +434,22 @@ string getLineHistory() {
     return history;
 }
 
-// pod class
-class ansicolor {
-private:
-    string color;
-public:
+typedef struct ansicolor {
+    string ansicode;
+
     ansicolor(string code) {
-        color = code;
+        ansicode = code;
     }
 
-    friend std::ostream& operator<<(ostream &out, const ansicolor &str) { 
-        return out; 
+    friend std::ostream& operator<<(ostream &out, const ansicolor &color) { 
+        // use c++11 stream iterator over the string
+        auto code = color.ansicode;
+        for (unsigned int i = 0; i < code.size(); i++) {
+            out.put(code[i]);
+        }
+        return out;
     }
-};
+} ansicolor;
 
 // main
 
@@ -465,8 +468,10 @@ int main(int argc, char *argv[], char *envp[]) {
     ansicolor color_red(ANSI_COLOR_RED);
     ansicolor color_none(ANSI_COLOR_NONE);
 
-    string message(" red color ");
-    cout << color_red << message << endl;
+    cout << "fixed message: " << setw(8) << color_red << "0123" << color_none << " second message" <<endl;
+    cout << "fixed message: " << setw(8) << color_red << "01234" << color_none << " second message" <<endl;
+    cout << "fixed message: " << setw(8) << color_red << "012345" << color_none << " second message" <<endl;
+    cout << "fixed message: " << setw(8) << color_red << "0123456" << color_none << " second message" <<endl;
 
     cout << "% history located at " << lineHistory << endl;
 
