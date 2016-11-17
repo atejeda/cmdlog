@@ -52,7 +52,6 @@ static const std::string esurl = "http://localhost:9200";
 
 // https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html
 // "(content:this OR name:this) AND (content:that OR name:that)"
-// https://www.elastic.co/guide/en/elasticsearch/reference/current/search-request-sort.html
 
 static const std::string searchq = R"DL(
 {
@@ -67,7 +66,7 @@ static const std::string searchq = R"DL(
     },
     "query": {
         "query_string":  {
-            "default_field" : "text",
+            "fields" : ["*"],
             "query": "Host:gas06 AND text:fullauto AND tags:AOS64",
             "analyze_wildcard": true
         }
@@ -81,6 +80,8 @@ static const std::string searchq = R"DL(
     ]   
 }
 )DL";
+
+//             "default_field" : "text",
 
 // { "_score": { "order": "desc" }}
 
@@ -119,8 +120,9 @@ static const std::string searchqt = R"DL({
 
 #define LOGMSG(arg0, arg1) ((cout << "[ logger ] " << (__FUNCTION__) << " # (" << arg0 << "), " << (arg1) << endl), (void)0)
 
-#define ANSI_COLOR_RED  "\033[31m"
-#define ANSI_COLOR_NONE "\033[0m"
+#define ANSI_COLOR_RED    "\033[31m"
+#define ANSI_COLOR_YELLOW "\033[33m"
+#define ANSI_COLOR_NONE   "\033[0m"
 
 // typedefs
 
@@ -129,16 +131,37 @@ typedef struct {
     bool value;
 } logfield_t;
 
+typedef struct ansicolor {
+    string ansicode;
+
+    ansicolor(string code) {
+        ansicode = code;
+    }
+
+    friend std::ostream& operator<<(ostream &out, const ansicolor &color) { 
+        // use c++11 stream iterator over the string
+        auto code = &color.ansicode;
+        for (unsigned int i = 0; i < code->size(); i++) {
+            out.put((*code)[i]);
+        }
+        return out;
+    }
+} ansicolor;
+
 typedef void (*cmdFunction)(vector<string>);
 //typedef std::function<void (cmdFunction &)(vector<string>)> complete_cb;
 
 // static
 
+static const ansicolor color_red    (ANSI_COLOR_RED);
+static const ansicolor color_yellow (ANSI_COLOR_YELLOW);
+static const ansicolor color_none   (ANSI_COLOR_NONE);
+
 static std::map<std::string, logfield_t> logfields = {
     { "tags",         (logfield_t) { "tags",         true } },  // Tags
     { "sourceobject", (logfield_t) { "SourceObject", true  } }, // SourceObject
     { "thread",       (logfield_t) { "Thread",       false } }, // Thread
-    { "loglevel",     (logfield_t) { "LogLevel",     true } }, // LogLevel
+    { "loglevel",     (logfield_t) { "LogLevel",     true } },  // LogLevel
     { "timestamp",    (logfield_t) { "TimeStamp",    true  } }, // TimeStamp
     { "logid",        (logfield_t) { "LogId",        false } }, // LogId
     { "process",      (logfield_t) { "Process",      false } }, // Process
@@ -252,10 +275,10 @@ static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
 
                             if (*name == "LogLevel") {
                                 // https://en.wikipedia.org/wiki/ANSI_escape_code
-                                if (sfield == "xError" || sfield == "xEmergency") {
-                                    cout << std::setw(9) << "\033[31m" << (*field).asString() << "\033[0m" << " ";
+                                if (sfield == "Error" || sfield == "Emergency") {
+                                    cout << std::setw(9) << color_red << (*field).asString() << color_none << " ";
                                 } else if (sfield == "Warning") {
-                                    cout << std::setw(9) << "\033[33m" << (*field).asString() << "\033[0m" << " ";
+                                    cout << std::setw(9) << color_yellow << (*field).asString() << color_none << " ";
                                 } else {
                                     cout << std::setw(9) << (*field).asString() << " ";
                                 }
@@ -434,23 +457,6 @@ string getLineHistory() {
     return history;
 }
 
-typedef struct ansicolor {
-    string ansicode;
-
-    ansicolor(string code) {
-        ansicode = code;
-    }
-
-    friend std::ostream& operator<<(ostream &out, const ansicolor &color) { 
-        // use c++11 stream iterator over the string
-        auto code = color.ansicode;
-        for (unsigned int i = 0; i < code.size(); i++) {
-            out.put(code[i]);
-        }
-        return out;
-    }
-} ansicolor;
-
 // main
 
 int main(int argc, char *argv[], char *envp[]) {
@@ -464,14 +470,6 @@ int main(int argc, char *argv[], char *envp[]) {
 
     string lineHistory = getLineHistory();
     linenoiseHistoryLoad(lineHistory.c_str());
-
-    ansicolor color_red(ANSI_COLOR_RED);
-    ansicolor color_none(ANSI_COLOR_NONE);
-
-    cout << "fixed message: " << setw(8) << color_red << "0123" << color_none << " second message" <<endl;
-    cout << "fixed message: " << setw(8) << color_red << "01234" << color_none << " second message" <<endl;
-    cout << "fixed message: " << setw(8) << color_red << "012345" << color_none << " second message" <<endl;
-    cout << "fixed message: " << setw(8) << color_red << "0123456" << color_none << " second message" <<endl;
 
     cout << "% history located at " << lineHistory << endl;
 
