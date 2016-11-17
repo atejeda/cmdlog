@@ -31,6 +31,7 @@
 #include <algorithm>
 #include <iterator>
 #include <functional>
+#include <iomanip>
 
 #include <unistd.h>
 #include <sys/types.h>
@@ -53,20 +54,35 @@ static const std::string esurl = "http://localhost:9200";
 // "(content:this OR name:this) AND (content:that OR name:that)"
 // https://www.elastic.co/guide/en/elasticsearch/reference/current/search-request-sort.html
 
-static const std::string searchq = R"DL({
+static const std::string searchq = R"DL(
+{
     "from" : 0,
     "size" : 1,
+    "highlight": {
+        "fields": {
+          "*": { }
+        },
+        "require_field_match": false,
+        "fragment_size": 2147483647
+    },
     "query": {
         "query_string":  {
             "default_field" : "text",
-            "query": "*"
+            "query": "Host:gas06 AND text:fullauto AND tags:AOS64",
+            "analyze_wildcard": true
         }
     },
     "sort": [
-        { "TimeStamp":   { "order": "desc" }},
-        { "_score": { "order": "desc" }}
-    ]
-})DL";
+        { 
+            "@timestamp": { 
+                "order": "desc" 
+            }
+        }
+    ]   
+}
+)DL";
+
+// { "_score": { "order": "desc" }}
 
 static const std::string searchqt = R"DL({
     "from" : 0,
@@ -92,17 +108,25 @@ static const std::string searchqt = R"DL({
     }
 })DL";
 
+// std::setw (10)
+// printf("|%-10s|", "Hello"); printf("|%10s|", "Hello"); 
+// printf("%*s %s", indent, "", string); 
+// printf("%*s",space,"Hello");
+
 // defines
 
 #define GCC_VERSION ((__GNUC__ * 10000)  + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
 
 #define LOGMSG(arg0, arg1) ((cout << "[ logger ] " << (__FUNCTION__) << " # (" << arg0 << "), " << (arg1) << endl), (void)0)
 
+#define ANSI_COLOR_RED  "\033[31m"
+#define ANSI_COLOR_NONE "\033[0m"
+
 // typedefs
 
 typedef struct {
     std::string name;
-    bool        value;
+    bool value;
 } logfield_t;
 
 typedef void (*cmdFunction)(vector<string>);
@@ -219,10 +243,22 @@ static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
 
                         if (*value) {
                             auto field = &(root["hits"]["hits"][i]["_source"][*name]);
+                            auto sfield = (*field).asString();
 
                             if (*name == "tags") {
                                 // manage the array, print just first tag element
                                 cout << (*field)[0].asString() << " ";
+                            }
+
+                            if (*name == "LogLevel") {
+                                // https://en.wikipedia.org/wiki/ANSI_escape_code
+                                if (sfield == "xError" || sfield == "xEmergency") {
+                                    cout << std::setw(9) << "\033[31m" << (*field).asString() << "\033[0m" << " ";
+                                } else if (sfield == "Warning") {
+                                    cout << std::setw(9) << "\033[33m" << (*field).asString() << "\033[0m" << " ";
+                                } else {
+                                    cout << std::setw(9) << (*field).asString() << " ";
+                                }
                             } else {
                                 cout << (*field).asString() << " ";
                             }
@@ -266,10 +302,13 @@ void cmdQuery(vector<std::string> input) {
 
     mg_mgr_init(&mgr, NULL);
 
+    // _all for all index -> super slow (19 billion entries), 2800 shards, 10 nodes
+    // aos64-* for all aos64 index entries -> faster
+
     nc = mg_connect_http(
             &mgr,
             ev_handler,
-            constructUrl("/_all/_search").c_str(),
+            constructUrl("/aos64-*/_search").c_str(),
             header,
             constructQuery(input[1],
                 variables["from"],
@@ -395,6 +434,20 @@ string getLineHistory() {
     return history;
 }
 
+// pod class
+class ansicolor {
+private:
+    string color;
+public:
+    ansicolor(string code) {
+        color = code;
+    }
+
+    friend std::ostream& operator<<(ostream &out, const ansicolor &str) { 
+        return out; 
+    }
+};
+
 // main
 
 int main(int argc, char *argv[], char *envp[]) {
@@ -408,6 +461,13 @@ int main(int argc, char *argv[], char *envp[]) {
 
     string lineHistory = getLineHistory();
     linenoiseHistoryLoad(lineHistory.c_str());
+
+    ansicolor color_red(ANSI_COLOR_RED);
+    ansicolor color_none(ANSI_COLOR_NONE);
+
+    string message(" red color ");
+    cout << color_red << message << endl;
+
     cout << "% history located at " << lineHistory << endl;
 
     char* line;
