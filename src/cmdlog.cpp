@@ -39,6 +39,7 @@
 #include <unistd.h>
 #include <pwd.h>
 
+#include <cstdio>
 #include <algorithm>
 #include <iostream>
 #include <sstream>
@@ -59,9 +60,10 @@ using namespace std;
 #define GCC_VERSION ((__GNUC__ * 10000) + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
 #define LOGMSG(arg0, arg1) ((cout << "[ logger ] " << (__FUNCTION__) << " # (" << arg0 << "), " << (arg1) << endl), (void)0)
 
-#define ANSI_COLOR_RED    "\033[31m"
-#define ANSI_COLOR_YELLOW "\033[33m"
-#define ANSI_COLOR_NONE   "\033[0m"
+#define ANSI_COLOR_WHITE_BOLD "\033[1;37m"
+#define ANSI_COLOR_RED        "\033[31m"
+#define ANSI_COLOR_YELLOW     "\033[33m"
+#define ANSI_COLOR_NONE       "\033[0m"
 
 // constants
 
@@ -74,10 +76,10 @@ static const std::string searchq = R"DL({
     "size" : 1,
     "highlight": {
         "pre_tags": [
-            "\\033[37,1m"
+            "RRRRRRRRRR"
         ],
         "post_tags": [
-            "\\033[0m"
+            "BBBBBBB"
         ],
         "fields": {
           "*": { }
@@ -124,7 +126,6 @@ static const std::string searchqt = R"DL({
         }
     }
 })DL";
-
 
 // typedefs
 
@@ -242,14 +243,11 @@ string constructQuery(const string& query, const string& from,
     return json.toStyledString();
 }
 
-ostream& beautyfier(const string& field) {
-
-}
-
 void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
     struct http_message* reponse = (struct http_message*) ev_data;
     
     int connect_status = 0;
+    long hits = 0;
 
     stringstream jsonstream;
     Json::Value json;
@@ -273,12 +271,15 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
             jsonstream << reponse->body.p;
             jsonstream >> json;
 
-            cout << color_yellow << json.toStyledString() << color_none << endl;
+            // cout << color_yellow << json.toStyledString() << color_none << endl;
 
             // check if is possible to free reponse->body.p
 
-            if (!json["hits"]["hits"].size()) {
+            hits = json["hits"]["hits"].size();
+
+            if (!hits) {
                 auto errors = &json["error"]["root_cause"];
+
                 for (int i = 0; i < errors->size(); i++) {
                     auto reason = (*errors)[i]["reason"].asString();
                     auto type = (*errors)[i]["type"].asString();
@@ -288,19 +289,29 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
 
                 s_exit_flag = 1;
                 break;
-            }
+            } 
 
-            for (int i = 0; i < json["hits"]["hits"].size(); i++) {
+            // cout << "total hits " << hits << endl;
+
+            for (int i = 0; i < hits; i++) {
+
+                Json::Value highlights = json["hits"]["hits"][i]["highlight"];
+
                 for (int f = 0; f < vlogfields.size(); f++) {
+
                     try {
+
                         auto vfield = vlogfields[f];
-                        auto name = &((*vfield).name);
-                        auto value = &((*vfield).value);
+                        string* name = &((*vfield).name);
+                        bool* value = &((*vfield).value);
+
+                        Json::Value highlight_field = highlights[*name];
+                        bool is_highlighted = highlight_field.size() == 1;
 
                         if (*value) {
                             auto field = &(json["hits"]["hits"][i]["_source"][*name]);
                             auto strfield = (*field).asString();
-
+                            
                             if (*name == "tags") {
                                 // manage the array, print just first tag element
                                 cout << (*field)[0].asString() << " ";
@@ -308,22 +319,33 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
 
                             // log level in colors
                             if (*name == "LogLevel") {
+                                cout.width(9); 
+                                cout << left;
+
                                 if (strfield == "Error" || strfield == "Emergency") {
-                                    cout << std::setw(9) 
-                                         << color_red 
-                                         << (*field).asString() 
-                                         << color_none << " ";
+                                    cout << color_red;
                                 } else if (strfield == "Warning") {
-                                    cout << std::setw(9) 
-                                         << color_yellow 
-                                         << (*field).asString() 
-                                         << color_none << " ";
-                                } else {
-                                    cout << std::setw(9) 
-                                         << (*field).asString() << " ";
+                                    cout << color_yellow; 
                                 }
+
+                                cout << (*field).asString() << color_none << left << " ";
                             } else {
-                                cout << (*field).asString() << " ";
+                                if (is_highlighted) {
+                                    // use the hightlihted one instead
+                                    field = &highlight_field[0];
+                                    
+                                    string field_string = (*field).asString();
+
+                                    size_t cposstart = field_string.find("RRRRRRRRRR");
+                                    field_string.replace(cposstart, 10, ANSI_COLOR_WHITE_BOLD);
+
+                                    size_t cposend = field_string.find("BBBBBBB");
+                                    field_string.replace(cposend, 7, ANSI_COLOR_NONE);
+                                    
+                                    cout << field_string << " ";
+                                } else {
+                                    cout << (*field).asString() << " ";
+                                }
                             }
                         }
                     } catch (...) {
@@ -515,6 +537,9 @@ int main(int argc, char* argv[], char* envp[]) {
     cmdFunctions["disable"] = cmdDisableField;
     cmdFunctions["test"] = cmdTest;
     cmdFunctions["query"] = cmdQuery;
+
+    // processInput(string(argv[1]));
+    // return EXIT_SUCCESS;
 
     string lineHistory = getLineHistory();
     linenoiseHistoryLoad(lineHistory.c_str());
