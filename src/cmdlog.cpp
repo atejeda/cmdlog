@@ -22,20 +22,31 @@
  * { "analyze_wildcard": true }
  * { "unmapped_type": "boolean" }
  *
+ * check -fno-exceptions and -fno-rtti.
+ * https://gcc.gnu.org/wiki/CppConventions
+ * https://google.github.io/styleguide/cppguide.html
+ *
+ * References:
+ * 
+ * ANSI scape codes (colors)
+ *  - https://en.wikipedia.org/wiki/ANSI_escape_code
+ *
+ * Query references:
+ *  - https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html
  */
 
+#include <sys/types.h>
+#include <unistd.h>
+#include <pwd.h>
+
+#include <algorithm>
 #include <iostream>
 #include <sstream>
 #include <string>
 #include <map>
-#include <algorithm>
 #include <iterator>
 #include <functional>
 #include <iomanip>
-
-#include <unistd.h>
-#include <sys/types.h>
-#include <pwd.h>
 
 #include "mongoose.h"
 #include "json.h"
@@ -43,21 +54,31 @@
 
 using namespace std;
 
+// defines
+
+#define GCC_VERSION ((__GNUC__ * 10000) + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
+#define LOGMSG(arg0, arg1) ((cout << "[ logger ] " << (__FUNCTION__) << " # (" << arg0 << "), " << (arg1) << endl), (void)0)
+
+#define ANSI_COLOR_RED    "\033[31m"
+#define ANSI_COLOR_YELLOW "\033[33m"
+#define ANSI_COLOR_NONE   "\033[0m"
+
 // constants
 
 static const char* header = "Content-Type: application/json; charset=UTF-8\r\n";
 
-//elk-master@osfp9200
-static const std::string esurl = "http://localhost:9200";
+static const std::string esurl = "http://localhost:9200"; //elk-master@osfp9200
 
-// https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html
-// "(content:this OR name:this) AND (content:that OR name:that)"
-
-static const std::string searchq = R"DL(
-{
+static const std::string searchq = R"DL({
     "from" : 0,
     "size" : 1,
     "highlight": {
+        "pre_tags": [
+            "\\033[37,1m"
+        ],
+        "post_tags": [
+            "\\033[0m"
+        ],
         "fields": {
           "*": { }
         },
@@ -78,12 +99,7 @@ static const std::string searchq = R"DL(
             }
         }
     ]   
-}
-)DL";
-
-//             "default_field" : "text",
-
-// { "_score": { "order": "desc" }}
+})DL";
 
 static const std::string searchqt = R"DL({
     "from" : 0,
@@ -109,20 +125,6 @@ static const std::string searchqt = R"DL({
     }
 })DL";
 
-// std::setw (10)
-// printf("|%-10s|", "Hello"); printf("|%10s|", "Hello"); 
-// printf("%*s %s", indent, "", string); 
-// printf("%*s",space,"Hello");
-
-// defines
-
-#define GCC_VERSION ((__GNUC__ * 10000)  + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
-
-#define LOGMSG(arg0, arg1) ((cout << "[ logger ] " << (__FUNCTION__) << " # (" << arg0 << "), " << (arg1) << endl), (void)0)
-
-#define ANSI_COLOR_RED    "\033[31m"
-#define ANSI_COLOR_YELLOW "\033[33m"
-#define ANSI_COLOR_NONE   "\033[0m"
 
 // typedefs
 
@@ -138,7 +140,7 @@ typedef struct ansicolor {
         ansicode = code;
     }
 
-    friend std::ostream& operator<<(ostream &out, const ansicolor &color) { 
+    friend std::ostream& operator<<(ostream& out, const ansicolor& color) { 
         // use c++11 stream iterator over the string
         auto code = &color.ansicode;
         for (unsigned int i = 0; i < code->size(); i++) {
@@ -148,15 +150,17 @@ typedef struct ansicolor {
     }
 } ansicolor;
 
-typedef void (*cmdFunction)(vector<string>);
-//typedef std::function<void (cmdFunction &)(vector<string>)> complete_cb;
+typedef void (*cmdFunction)(const vector<string>&);
+//typedef std::function<void (cmdFunction &)(vector<string>)> cmdFunction;
 
 // static
 
+// ansi colors
 static const ansicolor color_red    (ANSI_COLOR_RED);
 static const ansicolor color_yellow (ANSI_COLOR_YELLOW);
 static const ansicolor color_none   (ANSI_COLOR_NONE);
 
+// log fields
 static std::map<std::string, logfield_t> logfields = {
     { "tags",         (logfield_t) { "tags",         true } },  // Tags
     { "sourceobject", (logfield_t) { "SourceObject", true  } }, // SourceObject
@@ -173,6 +177,7 @@ static std::map<std::string, logfield_t> logfields = {
     { "data",         (logfield_t) { "Data",         false } }  // Data
 };
 
+// log fiels in a order to be shown
 static vector<logfield_t*> vlogfields = {
     &(logfields["tags"]),
     &(logfields["logid"]),
@@ -189,6 +194,7 @@ static vector<logfield_t*> vlogfields = {
     &(logfields["data"])
 };
 
+// variables used in json queries
 static std::map<std::string, std::string> variables = {
     { "from", "0" },
     { "size", "5" },
@@ -197,67 +203,94 @@ static std::map<std::string, std::string> variables = {
     { "restricted", "0" }
 };
 
-static std::map<std::string, cmdFunction> cmdFunctions;
+// map of commands to functions to  
+static std::map<string, cmdFunction> cmdFunctions;
 
+// variable to control responses
 static int s_exit_flag = 0;
 
 // client
 
-string constructUrl(std::string url) {
-    std::string constructed_url = esurl + url;
+string constructUrl(const string& url) {
+    string constructed_url = esurl + url;
     return constructed_url;
 }
 
-std::string constructQuery(std::string query, std::string from, std::string size, std::string lte, std::string gte, const bool restricted) {
-    std::stringstream ss;
-    Json::Value root;
+string constructQuery(const string& query, const string& from, 
+    const string& size, const string& lte, const string& gte, 
+    const bool restricted) {
 
-    ss << (restricted ? searchqt : searchq);
-    ss >> root;
+    std::stringstream jsonstream;
+    Json::Value json;
+
+    // decide which query to use
+    jsonstream << (restricted ? searchqt : searchq);
+    jsonstream >> json;
 
     // time range
     if (restricted) {
-        root["query"]["filtered"]["filter"]["range"]["TimeStamp"]["lte"] = lte;
-        root["query"]["filtered"]["filter"]["range"]["TimeStamp"]["gte"] = gte;
-        root["query"]["filtered"]["query"]["query_string"]["query"] = query;
+        json["query"]["filtered"]["filter"]["range"]["TimeStamp"]["lte"] = lte;
+        json["query"]["filtered"]["filter"]["range"]["TimeStamp"]["gte"] = gte;
+        json["query"]["filtered"]["query"]["query_string"]["query"] = query;
     } else {
-        root["query"]["query_string"]["query"] = query;
+        json["query"]["query_string"]["query"] = query;
     }
 
-    root["from"] = from;
-    root["size"] = size;
+    json["from"] = from;
+    json["size"] = size;
 
-
-    return root.toStyledString();
+    return json.toStyledString();
 }
 
-static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
-    struct http_message *hm = (struct http_message *) ev_data;
-    int connect_status;
+ostream& beautyfier(const string& field) {
 
-    stringstream ss;
-    Json::Value root;
+}
+
+void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
+    struct http_message* reponse = (struct http_message*) ev_data;
+    
+    int connect_status = 0;
+
+    stringstream jsonstream;
+    Json::Value json;
 
     switch (ev) {
         case MG_EV_CONNECT:
 
-            connect_status = *(int *) ev_data;
+            connect_status = *(int*) ev_data;
+
             if (connect_status != 0) {
-                cout << "Error connecting to " << esurl << " " << strerror(connect_status);
+                cout << "Error during the connection...: "<< strerror(connect_status);
+                nc->flags |= MG_F_SEND_AND_CLOSE;
                 s_exit_flag = 1;
             }
 
             break;
 
         case MG_EV_HTTP_REPLY:
-            // printf("debug: \n%.*s\n", (int) hm->body.len, hm->body.p);
+            // printf("debug: \n%.*s\n", (int) reponse->body.len, reponse->body.p);          
 
-            ss << hm->body.p;
-            ss >> root;
+            jsonstream << reponse->body.p;
+            jsonstream >> json;
 
-            // check if is possible to free hm->body.p
+            cout << color_yellow << json.toStyledString() << color_none << endl;
 
-            for (unsigned i = 0; i < root["hits"]["hits"].size(); i++) {
+            // check if is possible to free reponse->body.p
+
+            if (!json["hits"]["hits"].size()) {
+                auto errors = &json["error"]["root_cause"];
+                for (int i = 0; i < errors->size(); i++) {
+                    auto reason = (*errors)[i]["reason"].asString();
+                    auto type = (*errors)[i]["type"].asString();
+
+                    cout << color_red << "error: " << color_none << type << ", " << reason << endl;
+                }
+
+                s_exit_flag = 1;
+                break;
+            }
+
+            for (int i = 0; i < json["hits"]["hits"].size(); i++) {
                 for (int f = 0; f < vlogfields.size(); f++) {
                     try {
                         auto vfield = vlogfields[f];
@@ -265,22 +298,29 @@ static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
                         auto value = &((*vfield).value);
 
                         if (*value) {
-                            auto field = &(root["hits"]["hits"][i]["_source"][*name]);
-                            auto sfield = (*field).asString();
+                            auto field = &(json["hits"]["hits"][i]["_source"][*name]);
+                            auto strfield = (*field).asString();
 
                             if (*name == "tags") {
                                 // manage the array, print just first tag element
                                 cout << (*field)[0].asString() << " ";
                             }
 
+                            // log level in colors
                             if (*name == "LogLevel") {
-                                // https://en.wikipedia.org/wiki/ANSI_escape_code
-                                if (sfield == "Error" || sfield == "Emergency") {
-                                    cout << std::setw(9) << color_red << (*field).asString() << color_none << " ";
-                                } else if (sfield == "Warning") {
-                                    cout << std::setw(9) << color_yellow << (*field).asString() << color_none << " ";
+                                if (strfield == "Error" || strfield == "Emergency") {
+                                    cout << std::setw(9) 
+                                         << color_red 
+                                         << (*field).asString() 
+                                         << color_none << " ";
+                                } else if (strfield == "Warning") {
+                                    cout << std::setw(9) 
+                                         << color_yellow 
+                                         << (*field).asString() 
+                                         << color_none << " ";
                                 } else {
-                                    cout << std::setw(9) << (*field).asString() << " ";
+                                    cout << std::setw(9) 
+                                         << (*field).asString() << " ";
                                 }
                             } else {
                                 cout << (*field).asString() << " ";
@@ -303,143 +343,151 @@ static void ev_handler(struct mg_connection *nc, int ev, void *ev_data) {
     }
 }
 
-void cmdQuery(vector<std::string> input) {
+void cmdQuery(const vector<std::string>& input) {
     if (input.size() < 2) {
         std::cout << "Usage: " << input[0] << " <query>\n";
         return;
     }
 
-    s_exit_flag = 0;
-    std::string iquery;
+    // data setup
 
-    for (unsigned i = 1; i < input.size() - 1; i++)
-        iquery += input[i] + " ";
+    string query;
 
-    if (input.size() > 1)
-        iquery += input[input.size() - 1];
+    for (unsigned i = 1; i < input.size() - 1; i++) {
+        query += input[i] + " ";
+    }
+
+    if (input.size() > 1) {
+        query += input[input.size() - 1];
+    }
 
     auto restricted = (variables["restricted"] == "1");
+    
+    auto from = variables["from"];
+    auto size = variables["size"];
+    auto lte = variables["lte"];
+    auto gte = variables["gte"];
 
-    struct mg_mgr mgr;
-    struct mg_connection *nc;
+    auto url = constructUrl("/aos64-*/_search");
+    auto jsonquery = constructQuery(query, from, size, lte, gte, restricted);
 
-    mg_mgr_init(&mgr, NULL);
+    // api call
 
-    // _all for all index -> super slow (19 billion entries), 2800 shards, 10 nodes
-    // aos64-* for all aos64 index entries -> faster
+    s_exit_flag = 0;
 
-    nc = mg_connect_http(
-            &mgr,
-            ev_handler,
-            constructUrl("/aos64-*/_search").c_str(),
-            header,
-            constructQuery(input[1],
-                variables["from"],
-                variables["size"],
-                variables["lte"],
-                variables["gte"],
-                restricted).c_str());
+    struct mg_mgr mmanager;
+    struct mg_connection *mconnection;
 
-    mg_set_protocol_http_websocket(nc);
+    mg_mgr_init(&mmanager, NULL);
 
-    while (s_exit_flag == 0)
-        mg_mgr_poll(&mgr, 1000);
+    mconnection = mg_connect_http(&mmanager, 
+        connectionHandler, url.c_str(), header, jsonquery.c_str());
 
-    mg_mgr_free(&mgr);
+    mg_set_protocol_http_websocket(mconnection);
+
+    while (s_exit_flag == 0) {
+        mg_mgr_poll(&mmanager, 1000);
+    }
+
+    mg_mgr_free(&mmanager);
 }
 
 // cmd functions
 
-void cmdShow(vector<string> argv) {
+void cmdShow(const vector<string>& argv) {
     // update this to c++11, auto& iter = mapwhatever
+    // std::map<std::string, logfield_t>::iter
 
     cout << "fields" << endl;
-    for (std::map<std::string, logfield_t>::iterator iterator = logfields.begin(); iterator != logfields.end(); iterator++) {
-        cout << " " << iterator->second.name;
-        for (unsigned int i = 0; i < 14 - iterator->first.size(); i++)
+    for (auto iter = logfields.begin(); iter != logfields.end(); iter++) {
+        cout << " " << iter->second.name;
+
+        for (unsigned int i = 0; i < 14 - iter->first.size(); i++) {
             cout << " ";
-        cout << ": " << iterator->second.value << endl;
+        }
+
+        cout << ": " << iter->second.value << endl;
     }
 
     cout << "variables" << endl;
-    for (auto iterator = variables.begin(); iterator != variables.end(); iterator++) {
-        cout << " " << iterator->first << " = " << iterator->second << endl;
+    for (auto iter = variables.begin(); iter != variables.end(); iter++) {
+        cout << " " << iter->first << " = " << iter->second << endl;
     }
 }
 
-void cmdSetv(vector<string> argv) {
+void cmdSetv(const vector<string>& argv) {
     if (argv.size() < 3) {
-        cout << "usage: " << argv[0] << " <variable> <value>" << endl;
+        cout << "usage: " << argv[0] << "set <variable> <value>" << endl;
         return;
     }
 
-    variables[argv[1]] =  argv[2];
+    variables[argv[1]] = argv[2];
 }
 
-void cmdManageField(string fieldName, bool enable) {
-    std::transform(fieldName.begin(), fieldName.end(), fieldName.begin(), ::tolower);
-    std::map<string, logfield_t>::iterator iter;
+void cmdManageField(string& field, const bool& enable = false) {
+    std::transform(field.begin(), field.end(), field.begin(), ::tolower);
 
-    if ((iter = logfields.find(fieldName)) == logfields.end()) {
-        cout << fieldName << " unvalid field name" << endl;
+    if (logfields.find(field) == logfields.end()) {
+        cout << field << " unvalid field name" << endl;
     } else {
-        logfields[fieldName].value = enable;
+        logfields[field].value = enable;
     }
 }
 
-void cmdEnableField(vector<string> argv) {
-    cmdManageField(argv[1], true);
+void cmdEnableField(const vector<string>& argv) {
+    string field = argv[1];
+    cmdManageField(field, true);
 }
 
-void cmdDisbleField(vector<string> argv) {
-    cmdManageField(argv[1], false);
+void cmdDisableField(const vector<string>& argv) {
+    string field = argv[1];
+    cmdManageField(field, false);
 }
 
-void cmdConnect(vector<string> argv) {
-    // todo
-}
+void cmdTest(const vector<std::string>& input) {
+    string query;
 
-void cmdTest(vector<std::string> argv) {
-    std::string iquery;
+    for (unsigned i = 1; i < input.size() - 1; i++) {
+        query += input[i] + " ";
+    }
 
-    for (unsigned i = 1; i < argv.size() - 1; i++)
-        iquery += argv[i] + " ";
-
-    if (argv.size() > 1)
-        iquery += argv[argv.size() - 1];
+    if (input.size() > 1) {
+        query += input[input.size() - 1];
+    }
 
     auto restricted = (variables["restricted"] == "1");
+    
+    auto from = variables["from"];
+    auto size = variables["size"];
+    auto lte = variables["lte"];
+    auto gte = variables["gte"];
 
-    cout << constructQuery(iquery,
-            variables["from"],
-            variables["size"],
-            variables["lte"],
-            variables["gte"],
-            restricted).c_str() << endl;
+    auto url = constructUrl("/aos64-*/_search");
+    auto jsonquery = constructQuery(query, from, size, lte, gte, restricted);
+
+    cout << jsonquery << endl;
 }
 
 // functions
 
-void processInput(string userInput) {
-    if (!userInput.size())
+void processInput(const string& userinput) {
+    if (!userinput.size() || userinput[0] == '#') {
         return;
+    }
 
-    if (userInput[0] == '#')
-        return;
-
-    istringstream inputStream(userInput);
+    istringstream inputstream(userinput);
 
     // #if GCC_VERSION > 40707
     //     vector<string> arguments { istream_iterator<string>{streamArgs}, istream_iterator<string>{} };
     // #else
-        vector<string> arguments;
-        string argument;
-        while (inputStream >> argument) {
-            arguments.push_back(argument);
-        }
+    vector<string> arguments;
+    string argument;
+    while (inputstream >> argument) {
+        arguments.push_back(argument);
+    }
     // #endif
 
-    string* commandline = static_cast<string*>(&arguments[0]);
+    string* commandline = &arguments[0];
 
     std::map<std::string, cmdFunction>::iterator iter;
 
@@ -459,12 +507,12 @@ string getLineHistory() {
 
 // main
 
-int main(int argc, char *argv[], char *envp[]) {
+int main(int argc, char* argv[], char* envp[]) {
     // register function maps
     cmdFunctions["show"] = cmdShow;
     cmdFunctions["set"] = cmdSetv;
     cmdFunctions["enable"] = cmdEnableField;
-    cmdFunctions["disable"] = cmdDisbleField;
+    cmdFunctions["disable"] = cmdDisableField;
     cmdFunctions["test"] = cmdTest;
     cmdFunctions["query"] = cmdQuery;
 
