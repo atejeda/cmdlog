@@ -1,5 +1,10 @@
 /**
- * A minimal command line tool to query almasw (ALMA Software) elasticsearch log repository.
+ * @file cmdlog.cpp
+ * @author https://github.com/atejeda/cmdlog
+ * @date September 2016
+ * @brief A minimal command line tool to query almasw (ALMA Software) 
+ *        elasticsearch log repository. (portable?, who knows).
+ *
  * Copyright (C) 2016  https://github.com/atejeda
  *
  * This program is free software; you can redistribute it and/or modify
@@ -17,10 +22,6 @@
  * Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301  USA
  *
  * Notes:
- * - Indexed patterns aos64-* (default), aos-*
- * - Not added but could be enabled in options:
- * { "analyze_wildcard": true }
- * { "unmapped_type": "boolean" }
  *
  * check -fno-exceptions and -fno-rtti.
  * https://gcc.gnu.org/wiki/CppConventions
@@ -34,6 +35,10 @@
  * Query references:
  *  - https://www.elastic.co/guide/en/elasticsearch/reference/current/query-dsl-query-string-query.html
  */
+
+// #ifndef __linux__
+// #error "Only linux is supported"
+// #endif
 
 #include <sys/types.h>
 #include <unistd.h>
@@ -60,72 +65,25 @@ using namespace std;
 #define GCC_VERSION ((__GNUC__ * 10000) + __GNUC_MINOR__ * 100 + __GNUC_PATCHLEVEL__)
 #define LOGMSG(arg0, arg1) ((cout << "[ logger ] " << (__FUNCTION__) << " # (" << arg0 << "), " << (arg1) << endl), (void)0)
 
-#define ANSI_COLOR_WHITE_BOLD "\033[1;37m"
-#define ANSI_COLOR_RED        "\033[31m"
-#define ANSI_COLOR_YELLOW     "\033[33m"
-#define ANSI_COLOR_NONE       "\033[0m"
+#define ANSI_COLOR_BLACK        "\033[0;30m"
+#define ANSI_COLOR_RED          "\033[0;31m"
+#define ANSI_COLOR_GREEN        "\033[0;32m"
+#define ANSI_COLOR_YELLOW       "\033[0;33m"
+#define ANSI_COLOR_BLUE         "\033[0;34m"
+#define ANSI_COLOR_MAGENTA      "\033[0;35m"
+#define ANSI_COLOR_CYAN         "\033[0;36m"
+#define ANSI_COLOR_WHILE        "\033[0;37m"
 
-// constants
+#define ANSI_COLOR_BOLD_BLACK   "\033[1;30m"
+#define ANSI_COLOR_BOLD_RED     "\033[1;31m"
+#define ANSI_COLOR_BOLD_GREEN   "\033[1;32m"
+#define ANSI_COLOR_BOLD_YELLOW  "\033[1;33m"
+#define ANSI_COLOR_BOLD_BLUE    "\033[1;34m"
+#define ANSI_COLOR_BOLD_MAGENTA "\033[1;35m"
+#define ANSI_COLOR_BOLD_CYAN    "\033[1;36m"
+#define ANSI_COLOR_BOLD_WHITE   "\033[1;37m"
 
-static const char* header = "Content-Type: application/json; charset=UTF-8\r\n";
-
-static const std::string esurl = "http://localhost:9200"; //elk-master@osfp9200
-
-static const std::string searchq = R"DL({
-    "from" : 0,
-    "size" : 1,
-    "highlight": {
-        "pre_tags": [
-            "RRRRRRRRRR"
-        ],
-        "post_tags": [
-            "BBBBBBB"
-        ],
-        "fields": {
-          "*": { }
-        },
-        "require_field_match": false,
-        "fragment_size": 2147483647
-    },
-    "query": {
-        "query_string":  {
-            "fields" : ["*"],
-            "query": "Host:gas06 AND text:fullauto AND tags:AOS64",
-            "analyze_wildcard": true
-        }
-    },
-    "sort": [
-        { 
-            "@timestamp": { 
-                "order": "desc" 
-            }
-        }
-    ]   
-})DL";
-
-static const std::string searchqt = R"DL({
-    "from" : 0,
-    "size" : 1,
-    "query" : {
-        "filtered" : {
-            "query" : {
-                "query_string": {
-                    "default_field" : "text",
-                    "query" : "*"
-                }
-            },
-            "filter" : {
-                "range" : {
-                    "TimeStamp" : {
-                        "lte": "2016-11-15T13:39:49.179",
-                        "gte": "2016-11-14T13:39:49.179",
-                        "format": "strict_date_hour_minute_second_fraction"
-                    }
-                }
-            }
-        }
-    }
-})DL";
+#define ANSI_COLOR_RESET        "\033[0m"
 
 // typedefs
 
@@ -151,15 +109,80 @@ typedef struct ansicolor {
     }
 } ansicolor;
 
+// static constants
+
+static const char* header = "Content-Type: application/json; charset=UTF-8\r\n";
+
+static const string esurl = "http://localhost:9200"; //elk-master@osfp9200
+
+static const std::string searchq = R"DL({
+    "from" : 0,
+    "size" : 1,
+    "highlight": {
+        "pre_tags": [
+            "some_tag"
+        ],
+        "post_tags": [
+            "some_tag"
+        ],
+        "fields": {
+          "*": { }
+        },
+        "require_field_match": false,
+        "fragment_size": 2147483647
+    },
+    "query": {
+        "query_string":  {
+            "default_field" : "text",
+            "fields" : ["*"],
+            "query": "Host:gas06 AND text:fullauto AND tags:AOS64",
+            "analyze_wildcard": true
+        }
+    },
+    "sort": [
+        { 
+            "@timestamp": { 
+                "order": "desc" 
+            }
+        }
+    ]   
+})DL";
+
+// function pointer to map commands to functions
 typedef void (*cmdFunction)(const vector<string>&);
 //typedef std::function<void (cmdFunction &)(vector<string>)> cmdFunction;
 
-// static
-
 // ansi colors
-static const ansicolor color_red    (ANSI_COLOR_RED);
-static const ansicolor color_yellow (ANSI_COLOR_YELLOW);
-static const ansicolor color_none   (ANSI_COLOR_NONE);
+
+static const ansicolor color_black        (ANSI_COLOR_BLACK);
+static const ansicolor color_red          (ANSI_COLOR_RED);
+static const ansicolor color_green        (ANSI_COLOR_GREEN);
+static const ansicolor color_yellow       (ANSI_COLOR_YELLOW);
+static const ansicolor color_blue         (ANSI_COLOR_BLUE);
+static const ansicolor color_magenta      (ANSI_COLOR_MAGENTA);
+static const ansicolor color_cyan         (ANSI_COLOR_CYAN);
+static const ansicolor color_white        (ANSI_COLOR_WHILE);
+
+static const ansicolor color_bold_black   (ANSI_COLOR_BOLD_BLACK);
+static const ansicolor color_bold_red     (ANSI_COLOR_BOLD_RED);
+static const ansicolor color_bold_green   (ANSI_COLOR_BOLD_GREEN);
+static const ansicolor color_bold_yellow  (ANSI_COLOR_BOLD_YELLOW);
+static const ansicolor color_bold_blue    (ANSI_COLOR_BOLD_BLUE);
+static const ansicolor color_bold_magenta (ANSI_COLOR_BOLD_MAGENTA);
+static const ansicolor color_bold_cyan    (ANSI_COLOR_BOLD_CYAN);
+static const ansicolor color_bold_white   (ANSI_COLOR_BOLD_WHITE);
+
+static const ansicolor color_reset        (ANSI_COLOR_RESET);
+
+// tags used to highlight fields
+static const string pretag  = color_red.ansicode;
+static const string posttag = color_reset.ansicode;
+
+// map of commands to functions to  
+static std::map<string, cmdFunction> cmdFunctions;
+
+// variable to control responses from rest
+static int s_exit_flag = 0;
 
 // log fields
 static std::map<std::string, logfield_t> logfields = {
@@ -198,17 +221,11 @@ static vector<logfield_t*> vlogfields = {
 // variables used in json queries
 static std::map<std::string, std::string> variables = {
     { "from", "0" },
-    { "size", "5" },
+    { "size", "50" },
     { "lte", "2016-11-15T13:39:49.179" },
     { "gte", "2016-11-14T13:39:49.179" },
     { "restricted", "0" }
 };
-
-// map of commands to functions to  
-static std::map<string, cmdFunction> cmdFunctions;
-
-// variable to control responses
-static int s_exit_flag = 0;
 
 // client
 
@@ -217,25 +234,18 @@ string constructUrl(const string& url) {
     return constructed_url;
 }
 
-string constructQuery(const string& query, const string& from, 
-    const string& size, const string& lte, const string& gte, 
-    const bool restricted) {
+string constructQuery(const string& query, const string& from, const string& size) {
 
     std::stringstream jsonstream;
     Json::Value json;
 
-    // decide which query to use
-    jsonstream << (restricted ? searchqt : searchq);
+    jsonstream << searchq;
     jsonstream >> json;
 
-    // time range
-    if (restricted) {
-        json["query"]["filtered"]["filter"]["range"]["TimeStamp"]["lte"] = lte;
-        json["query"]["filtered"]["filter"]["range"]["TimeStamp"]["gte"] = gte;
-        json["query"]["filtered"]["query"]["query_string"]["query"] = query;
-    } else {
-        json["query"]["query_string"]["query"] = query;
-    }
+
+    json["query"]["query_string"]["query"] = query;
+    json["highlight"]["pre_tags"][0] = pretag;
+    json["highlight"]["post_tags"][0] = posttag;
 
     json["from"] = from;
     json["size"] = size;
@@ -271,7 +281,7 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
             jsonstream << reponse->body.p;
             jsonstream >> json;
 
-            // cout << color_yellow << json.toStyledString() << color_none << endl;
+            // cout << color_yellow << json.toStyledString() << color_reset << endl;
 
             // check if is possible to free reponse->body.p
 
@@ -284,23 +294,19 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
                     auto reason = (*errors)[i]["reason"].asString();
                     auto type = (*errors)[i]["type"].asString();
 
-                    cout << color_red << "error: " << color_none << type << ", " << reason << endl;
+                    cout << color_red << "error: " << color_reset << type << ", " << reason << endl;
                 }
 
                 s_exit_flag = 1;
                 break;
             } 
 
-            // cout << "total hits " << hits << endl;
-
-            for (int i = 0; i < hits; i++) {
+            for (int i = hits - 1; i >= 0 ; i--) {
 
                 Json::Value highlights = json["hits"]["hits"][i]["highlight"];
 
                 for (int f = 0; f < vlogfields.size(); f++) {
-
                     try {
-
                         auto vfield = vlogfields[f];
                         string* name = &((*vfield).name);
                         bool* value = &((*vfield).value);
@@ -311,6 +317,10 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
                         if (*value) {
                             auto field = &(json["hits"]["hits"][i]["_source"][*name]);
                             auto strfield = (*field).asString();
+
+                            if (strfield[strfield.size() - 1] == '\n') {
+                                strfield = strfield.substr(0, strfield.size() - 2);
+                            }
                             
                             if (*name == "tags") {
                                 // manage the array, print just first tag element
@@ -326,22 +336,18 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
                                     cout << color_red;
                                 } else if (strfield == "Warning") {
                                     cout << color_yellow; 
+                                } else if (strfield == "Info") {
+                                    cout << color_green; 
+                                } else if (strfield == "Debug") {
+                                    cout << color_magenta; 
                                 }
 
-                                cout << (*field).asString() << color_none << left << " ";
+                                cout << (*field).asString() << color_reset << left << " ";
                             } else {
-                                if (is_highlighted) {
+                                if (is_highlighted) {// string::npos
                                     // use the hightlihted one instead
                                     field = &highlight_field[0];
-                                    
                                     string field_string = (*field).asString();
-
-                                    size_t cposstart = field_string.find("RRRRRRRRRR");
-                                    field_string.replace(cposstart, 10, ANSI_COLOR_WHITE_BOLD);
-
-                                    size_t cposend = field_string.find("BBBBBBB");
-                                    field_string.replace(cposend, 7, ANSI_COLOR_NONE);
-                                    
                                     cout << field_string << " ";
                                 } else {
                                     cout << (*field).asString() << " ";
@@ -382,8 +388,6 @@ void cmdQuery(const vector<std::string>& input) {
     if (input.size() > 1) {
         query += input[input.size() - 1];
     }
-
-    auto restricted = (variables["restricted"] == "1");
     
     auto from = variables["from"];
     auto size = variables["size"];
@@ -391,7 +395,7 @@ void cmdQuery(const vector<std::string>& input) {
     auto gte = variables["gte"];
 
     auto url = constructUrl("/aos64-*/_search");
-    auto jsonquery = constructQuery(query, from, size, lte, gte, restricted);
+    auto jsonquery = constructQuery(query, from, size);
 
     // api call
 
@@ -476,8 +480,6 @@ void cmdTest(const vector<std::string>& input) {
     if (input.size() > 1) {
         query += input[input.size() - 1];
     }
-
-    auto restricted = (variables["restricted"] == "1");
     
     auto from = variables["from"];
     auto size = variables["size"];
@@ -485,7 +487,7 @@ void cmdTest(const vector<std::string>& input) {
     auto gte = variables["gte"];
 
     auto url = constructUrl("/aos64-*/_search");
-    auto jsonquery = constructQuery(query, from, size, lte, gte, restricted);
+    auto jsonquery = constructQuery(query, from, size);
 
     cout << jsonquery << endl;
 }
@@ -538,15 +540,21 @@ int main(int argc, char* argv[], char* envp[]) {
     cmdFunctions["test"] = cmdTest;
     cmdFunctions["query"] = cmdQuery;
 
-    // processInput(string(argv[1]));
-    // return EXIT_SUCCESS;
-
     string lineHistory = getLineHistory();
     linenoiseHistoryLoad(lineHistory.c_str());
 
-    cout << "% history located at " << lineHistory << endl;
-
     char* line;
+
+    if (argc > 1) {
+        line = argv[1];
+        linenoiseHistoryAdd(line);
+        linenoiseHistorySave(lineHistory.c_str());
+        processInput(string(line));
+
+        return EXIT_SUCCESS;
+    }
+
+    cout << "% history located at " << lineHistory << endl;
     while((line = linenoise("cmdlog % ")) != NULL) {
         linenoiseHistoryAdd(line);
         linenoiseHistorySave(lineHistory.c_str());
