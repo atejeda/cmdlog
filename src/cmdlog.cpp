@@ -221,10 +221,7 @@ static vector<logfield_t*> vlogfields = {
 // variables used in json queries
 static std::map<std::string, std::string> variables = {
     { "from", "0" },
-    { "size", "50" },
-    { "lte", "2016-11-15T13:39:49.179" },
-    { "gte", "2016-11-14T13:39:49.179" },
-    { "restricted", "0" }
+    { "size", "50" }
 };
 
 // client
@@ -355,7 +352,7 @@ void connectionHandler(struct mg_connection *nc, int ev, void *ev_data) {
                             }
                         }
                     } catch (...) {
-                        // unparseable, do nothing...
+                        // unparseable, do nothing (?)...
                     }
                 }
 
@@ -391,8 +388,6 @@ void cmdQuery(const vector<std::string>& input) {
     
     auto from = variables["from"];
     auto size = variables["size"];
-    auto lte = variables["lte"];
-    auto gte = variables["gte"];
 
     auto url = constructUrl("/aos64-*/_search");
     auto jsonquery = constructQuery(query, from, size);
@@ -406,8 +401,7 @@ void cmdQuery(const vector<std::string>& input) {
 
     mg_mgr_init(&mmanager, NULL);
 
-    mconnection = mg_connect_http(&mmanager, 
-        connectionHandler, url.c_str(), header, jsonquery.c_str());
+    mconnection = mg_connect_http(&mmanager, connectionHandler, url.c_str(), header, jsonquery.c_str());
 
     mg_set_protocol_http_websocket(mconnection);
 
@@ -501,15 +495,11 @@ void processInput(const string& userinput) {
 
     istringstream inputstream(userinput);
 
-    // #if GCC_VERSION > 40707
-    //     vector<string> arguments { istream_iterator<string>{streamArgs}, istream_iterator<string>{} };
-    // #else
     vector<string> arguments;
     string argument;
     while (inputstream >> argument) {
         arguments.push_back(argument);
     }
-    // #endif
 
     string* commandline = &arguments[0];
 
@@ -554,8 +544,8 @@ int main(int argc, char* argv[], char* envp[]) {
         return EXIT_SUCCESS;
     }
 
-    cout << "% history located at " << lineHistory << endl;
-    while((line = linenoise("cmdlog % ")) != NULL) {
+    cout << "> history located at " << lineHistory << endl;
+    while((line = linenoise("> ")) != NULL) {
         linenoiseHistoryAdd(line);
         linenoiseHistorySave(lineHistory.c_str());
         processInput(string(line));
