@@ -6,7 +6,7 @@ An interactive and small command line tool to query almasw (ALMA Software) elast
 
 Even though kibana is useful to perform analysis, it doesn't help too much for the developer debug problems (at least is a problematic thing to me), this is due how the logs are presented to the user, the idea of this tool is to query elasticsearch directly without passing through kibana and print out the logs in plain ASCII (similar to the container logs) to the stdout allowing the possibility to copy them.
 
-## features
+## Features
 
  - It's a terminal based tool, supports ASCII scape codes and history is saved in $HOME/.cmdlog_history
 
